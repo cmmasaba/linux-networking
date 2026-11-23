@@ -97,7 +97,13 @@ sudo ip link set veth-ns-br1 master test-bridge
 sudo ip link set veth-ns-br2 master test-bridge
 ```
 
-Try pinging ns1 from ns2 and vice-versa
+Try pinging ns1 from ns2 and vice-versa, we expect packets to be delivered.
+
+```bash
+
+sudo ip -n ns1 ping 192.168.100.171
+sudo ip -n ns2 ping 192.168.100.170
+```
 
 Add NAT for the two veths in ns1 and ns2:
 
@@ -107,5 +113,17 @@ sudo iptables -t nat -A POSTROUTING -s 192.168.100.0/24 ! -o test-bridge -j MASQ
 ```
 
 Download content from a site on the internet from any of the namespaces
+
+```bash
+
+sudo ip -n ns1 bash
+wget -O /dev/null https://hetzner.com
+```
+
+```bash
+
+sudo ip -n ns2 bash
+wget -O /dev/null https://hetzner.com
+```
 
 Check the connection tracking stats for the namespaces and NAT
