@@ -2,10 +2,14 @@
 
 The three building blocks:
 
-- namespace
-- virtual interface
-- software bridge
-- routing and NAT
+- namespace: represents a single docker service
+- virtual interface: represents a network link to a namespace
+- software bridge: an L2 software switch connecting two namespaces
+- routing and NAT: configures how the namespace accesses the internet through the host network interface
+
+The final architecture will look like this:
+
+![](/assets/network_namespaces.png)
 
 ### Prerequisites
 
@@ -54,22 +58,7 @@ sudo ip link set test-bridge up
 
 ### Create virtual interfaces
 
-Create 2 veth pairs. Each namespace has one virtual interface inside it, communicating with its peer in the host namespace. The virtual interfaces in the host namespace will be connected to the bridge created above. Include a diagram of the architecture.
-
-```
-ns1                          ns2
-veth-ns1  10.200.0.10        veth-ns2  10.200.0.11
-	|                            |
------|----------- host -----------|-----------
-veth-ns1-br                  veth-ns2-br
-		\________ test-bridge _______/
-							10.200.0.1   (gateway)
-									|
-				ip_forward + MASQUERADE
-									|
-								wlp1s0 → internet
-```
-
+Create 2 veth pairs. Each namespace has one virtual interface inside it, communicating with its peer in the host namespace. The virtual interfaces in the host namespace will be connected to the bridge.<br>
 Create the 4 virtual interfaces
 
 ```bash
@@ -138,7 +127,7 @@ At this point I want to test connectivity to the internet but I need to do a few
 - is DNS working inside the namespaces?
 - is ufw active and what policy is it configured with?
 
-#### Checking IP forwarding
+#### Configure IP forwarding
 
 The IP layer makes one of two decisions when a packet arrives at any of the network interfaces. If the destination IP address is the same as the host's address then it is addressed to the machine and it is delivered to the upper protocol layers. If the destination IP address is different from the host's then it either drops the packet or forwards it to the next hop. IP forwarding is the setting that controls this behaviour. By default, this IP forwarding is off for security reasons, meaning packets not addressed to the host are dropped. A host with IP forwarding on can pass traffic from a trusted to an untrusted network. Docker and K8s enable it because they need to route traffic. When IP forwarding is enabled it's recommended to accompany it with a `ufw` firewall policy that controls the traffic allowed.<br>
 To check the current IP forwarding configuration:
@@ -148,7 +137,7 @@ sysctl net.ipv4.ip_forward # if it 0 it is disabled
 sudo sysctl -w net.ipv4.ip_forward=1 # enable it until the next reboot
 ```
 
-#### Firewall policy configuration
+#### Configure firewall policy for forwarded packets
 
 Firewall config and management on Ubuntu and Debian systems is done using ufw(Uncomplcated Firewall). Check if the firewall is enabled:
 
@@ -156,13 +145,34 @@ Firewall config and management on Ubuntu and Debian systems is done using ufw(Un
 sudo ufw status
 ```
 
-Response such as `Status: inactive` means ufw is not enabled so no further configuration is needed. If you have Docker installed it'll most likely be active. The default behaviour is to drop forwarded packets, to enable it:
+`Status: inactive` means ufw is not enabled so no further action is needed. Otherwise you have to enable it:
 
 ```bash
 sudo ufw route allow in on test-bridge out on wlp1s0
 ```
 
-Replace wlp1s0 with your interface name. The command translates to: "allowed routed traffic arriving in from test-bridge and going out through wlp1s0"
+Replace wlp1s0 with your interface name. The command translates to: "allowed routed traffic arriving in from test-bridge and going out through wlp1s0".<br>
+Replies come in the opposite direction, from wlp1s0 to test-bridge. These are covered by a separate built-in rule which accepts incoming forwarded packets that belong to a connection that is already being tracked.
+
+#### Configure DNS lookup inside the namespaces
+
+DNS is the process of resolving an IP address from a name. On Linux, there are 2 ways a program can resolve a name. Most programs do this by calling glibc's `getaddrinfo()` which checks the `hosts` entry in `/etc/nsswitch.conf`. On my machine, the value of that entry is:
+
+```
+hosts:          files mdns4_minimal [NOTFOUND=return] dns myhostname
+```
+`files` checks the contents of /etc/hosts. `mds4_minimal` handles resolution for .local names, which are top level domain names announced by devices on the local network without the help of DNS. `dns` sends a DNS query to the servers listed in /etc/resolv.conf. `myhostname` resolves the machine's own hostname.<br>
+The other approach is by using DNS tools which skip `nsswitch` and query the servers in /etc/resolv.conf.<br>
+A process running in ns1 or ns2 that needs to resolve a name reads /etc/resolv.conf, on my machine the contents are: `nameserver 127.0.0.53`. The server listening on that address is systemd-resolved.<br>
+But you have to remember that a namespace isolates an entire network stack, the network interfaces(loopback included), ip addresses, routing information, etc. The host has its own network stack, so does ns1 and ns2. Therefore, when a process in ns1 makes a request on 127.0.0.53 nothing is listening on that address, because ns1's loopback interface is different from the host's, on which systemd-resolved is listening.<br>
+To fix this, I will configure the DNS server for ns1 and ns2 under /etc/netns/ns1/ and /etc/netns/ns2/.
+```bash
+sudo mkdir -p /etc/netns/ns1
+echo 'nameserver 1.1.1.1' | sudo tee /etc/netns/ns1/resolv.conf
+
+sudo mkdir -p /etc/netns/ns2
+echo 'nameserver 1.1.1.1' | sudo tee /etc/netns/ns1/resolv.conf
+```
 
 Download content from a site on the internet from any of the namespaces
 
