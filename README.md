@@ -184,7 +184,7 @@ sudo ip netns exec ns2 wget -O /dev/null https://hetzner.com
 Check the connection tracking stats for the namespaces and NAT
 
 ```bash
-bridge fdb show dev test-bridge # view the table used by the bridge to earn MAC addresses of the veths
+bridge fdb show br test-bridge # view the table used by the bridge to earn MAC addresses of the veths
 
 sudo conntrack -L -s 10.200.0.0/24
 sudo iptables -t nat -L POSTROUTING -n -v
