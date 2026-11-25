@@ -20,14 +20,12 @@ sudo, iproute2, iptables, conntrack, wget, a subnet your LAN doesn't use
 List all namespaces on the machine:
 
 ```bash
-
 sudo ip netns list
 ```
 
 Create 2 new namespaces
 
 ```bash
-
 sudo ip netns add ns1
 sudo ip netns add ns2
 ```
@@ -39,21 +37,18 @@ sudo ip netns add ns2
 A bridge is a link device of type `bridge`. To create one:
 
 ```bash
-
 sudo ip link add test-bridge type bridge
 ```
 
 Assign an IP address to the bridge:
 
 ```bash
-
 sudo ip addr add 10.200.0.1/24 dev test-bridge
 ```
 
 Bring up the bridge:
 
 ```bash
-
 sudo ip link set test-bridge up
 ```
 
@@ -63,7 +58,6 @@ Create 2 veth pairs. Each namespace has one virtual interface inside it, communi
 Create the 4 virtual interfaces
 
 ```bash
-
 sudo ip link add veth-ns1 type veth peer name veth-ns1-br
 sudo ip link add veth-ns2 type veth peer name veth-ns2-br
 ```
@@ -71,7 +65,6 @@ sudo ip link add veth-ns2 type veth peer name veth-ns2-br
 Move the two virtual interfaces into their namespaces:
 
 ```bash
-
 sudo ip link set veth-ns1 netns ns1
 sudo ip link set veth-ns2 netns ns2
 ```
@@ -79,7 +72,6 @@ sudo ip link set veth-ns2 netns ns2
 Attach the host-side veths to the bridge:
 
 ```bash
-
 sudo ip link set veth-ns1-br master test-bridge
 sudo ip link set veth-ns2-br master test-bridge
 ```
@@ -87,7 +79,6 @@ sudo ip link set veth-ns2-br master test-bridge
 Bring up the host-side veths:
 
 ```bash
-
 sudo ip link set veth-ns1-br up
 sudo ip link set veth-ns2-br up
 ```
@@ -95,7 +86,6 @@ sudo ip link set veth-ns2-br up
 Bring up the veth loopback interfaces. Assign IP addresses and bring the veths up. Then add routing information:
 
 ```bash
-
 sudo ip -n ns1 link set lo up
 sudo ip -n ns1 addr add 10.200.0.10/24 dev veth-ns1
 sudo ip -n ns1 link set veth-ns1 up
@@ -110,7 +100,6 @@ sudo ip -n ns2 route add default via 10.200.0.1
 Ping ns1 from ns2 and vice-versa, we expect packets to be delivered.
 
 ```bash
-
 sudo ip netns exec ns1 ping -c 3 10.200.0.11
 sudo ip netns exec ns2 ping -c 3 10.200.0.10
 ```
@@ -118,7 +107,6 @@ sudo ip netns exec ns2 ping -c 3 10.200.0.10
 Add NAT for the subnet:
 
 ```bash
-
 sudo iptables -t nat -A POSTROUTING -s 10.200.0.0/24 ! -o test-bridge -j MASQUERADE
 ```
 
@@ -183,34 +171,34 @@ After running these commands, if you had a bash terminal created using `ip netns
 
 ### Test internet access
 
-Download content from a site on the internet from any of the namespaces
+Download a dummy file from the internet from any of the namespaces
 
 ```bash
-
 sudo ip netns exec ns1 wget -O /dev/null https://hetzner.com
 ```
 
 ```bash
-
 sudo ip netns exec ns2 wget -O /dev/null https://hetzner.com
 ```
 
 Check the connection tracking stats for the namespaces and NAT
 
 ```bash
+bridge fdb show dev test-bridge # view the table used by the bridge to earn MAC addresses of the veths
 
 sudo conntrack -L -s 10.200.0.0/24
 sudo iptables -t nat -L POSTROUTING -n -v
+
+tcpdump -i test-bridge -n # watch packet flow through the bridge
 ```
 
 ## Cleanup
 
 ```bash
-
-sudo ip netns del ns1 && sudo ip netns del ns2   # destroys both veth pairs too
-sudo ip link del test-bridge
-sudo iptables -t nat -D POSTROUTING -s 10.200.0.0/24 ! -o test-bridge -j MASQUERADE
-sudo ufw route delete allow in on test-bridge out on wlp1s0
-sudo rm -rf /etc/netns/ns1 /etc/netns/ns2
-sudo sysctl -w net.ipv4.ip_forward=0
+sudo ip netns del ns1 && sudo ip netns del ns2   # remove the namespaces and veths
+sudo ip link del test-bridge # remove the bridge
+sudo iptables -t nat -D POSTROUTING -s 10.200.0.0/24 ! -o test-bridge -j MASQUERADE # remove the NAT rule
+sudo ufw route delete allow in on test-bridge out on wlp1s0 # remove the firewall rule, only if you added the rule
+sudo rm -rf /etc/netns/ns1 /etc/netns/ns2 # remove the namespace DNS files
+sudo sysctl -w net.ipv4.ip_forward=0 # disable IP forwarding
 ```
