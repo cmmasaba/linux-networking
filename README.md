@@ -9,7 +9,7 @@ The four building blocks:
 
 The final architecture will look like this:
 
-![](assets/network_namespaces.png)
+![Network architecture](assets/network_namespaces.png)
 
 ## Prerequisites
 
